@@ -86,24 +86,6 @@ function Vector3(x,y,z)
 	return v;
 }
 
-/*
-function Vertex3(mesh,index,x,y,z)
-{
-	var vertex = {
-		mesh:mesh,
-		index:index,
-		x:x,
-		y:y,
-		z:z,
-		vector_from:function(orig)
-		{
-			return Vector3(vertex.x - orig.x, vertex.y - orig.y, vertex.z - orig.z);
-		}
-	};
-	return vertex;
-}
-*/
-
 function Point3(x,y,z)
 {
 	var point = {
@@ -123,15 +105,18 @@ function Point3(x,y,z)
 	return point;
 }
 
-function VertexT(mesh,index,v3index,s,t)
+function PointT(s,t)
 {
-	return {
-		mesh:mesh,
-		index:index,
-		v3index:index,
+	var point = {
 		s:s,
-		t:t
+		t:t,
+		slide_to:function(dest,a)
+		{
+			var b = 1-a;
+			return PointT(point.s * b + dest.s * a, point.t * b + dest.t * a);
+		}
 	};
+	return point;
 }
 
 function HalfEdge(triangle,cindex0)
@@ -155,6 +140,14 @@ function HalfEdge(triangle,cindex0)
 		{
 			return triangle.corners[(cindex0+1) % 3];
 		},
+		vt0: function()
+		{
+			return triangle.corners[cindex0].vt();
+		},
+		vt1: function()
+		{
+			return triangle.corners[(cindex0+1) % 3].vt();
+		},
 		middle: function()
 		{
 			return edge.v0().slide_to(edge.v1(), 0.5);
@@ -168,11 +161,15 @@ function Corner(triangle,cindex,vtindex)
 	var corner = {
 		triangle: triangle,
 		cindex: cindex,
-		v3index: triangle.mesh.vt[vtindex].v3index,
+		v3index: triangle.mesh.vt_to_v3_index[vtindex],
 		vtindex: vtindex,
 		v3: function()
 		{
 			return triangle.mesh.v3[corner.v3index];
+		},
+		vt: function()
+		{
+			return triangle.mesh.vt[corner.vtindex];
 		},
 		next: function()
 		{
@@ -196,6 +193,10 @@ function Corner(triangle,cindex,vtindex)
 		shrink_point: function(a)
 		{
 			return corner.v3().slide_to(triangle.centroid(), a);
+		},
+		shrink_vt: function(a)
+		{
+			return corner.vt().slide_to(triangle.centroidT(), a);
 		}
 	};
 	return corner;
@@ -211,6 +212,13 @@ function Triangle(mesh,index0,index1,index2)
 				(triangle.corners[0].v3().x + triangle.corners[1].v3().x + triangle.corners[2].v3().x) / 3,
 				(triangle.corners[0].v3().y + triangle.corners[1].v3().y + triangle.corners[2].v3().y) / 3,
 				(triangle.corners[0].v3().z + triangle.corners[1].v3().z + triangle.corners[2].v3().z) / 3
+			);
+		},
+		centroidT: function()
+		{
+			return PointT(
+				(triangle.corners[0].vt().s + triangle.corners[1].vt().s + triangle.corners[2].vt().s) / 3,
+				(triangle.corners[0].vt().t + triangle.corners[1].vt().t + triangle.corners[2].vt().t) / 3
 			);
 		}
 	};
@@ -232,21 +240,24 @@ function Mesh()
 	var mesh = {
 		v3: [],
 		vt: [],
+		vt_to_v3_index: [],
 		tri: [],
 
 		vertex: function(x,y,z,s,t) {
 			var v3index = mesh.v3.length;
 			var vtindex = mesh.vt.length;
 
+			mesh.vt_to_v3_index.push(v3index);
 			mesh.v3.push(Point3(x,y,z));
-			mesh.vt.push(VertexT(mesh,vtindex,v3index,s,t));
+			mesh.vt.push(PointT(s,t));
 			return mesh;
 		},
 		split_vertex: function(s,t) {
 			var v3index = mesh.v3.length - 1;
 			var vtindex = mesh.vt.length;
 
-			mesh.vt.push(VertexT(mesh,vtindex,v3index,s,t));
+			mesh.vt_to_v3_index.push(v3index);
+			mesh.vt.push(PointT(s,t));
 			return mesh;
 		},
 		triangle: function(index0,index1,index2) {
@@ -266,7 +277,7 @@ function Mesh()
 		},
 		draw3_svg: function() {
 			var data = mesh.half_edges();
-			var lines = d3.select('svg').selectAll('line')
+			var lines = d3.select('#threed').selectAll('line')
 				.data(data);
 
 			lines.enter().append('line')
@@ -274,13 +285,31 @@ function Mesh()
 
 			lines.exit().remove();
 
-			d3.select('svg').selectAll('line')
+			d3.select('#threed').selectAll('line')
 				.attr('stroke-width', edge_thickness)
 				.attr('x1', e => projectx(e.c0().shrink_point(0.05)))
 				.attr('y1', e => projecty(e.c0().shrink_point(0.05)))
 				.attr('x2', e => projectx(e.c1().shrink_point(0.05)))
 				.attr('y2', e => projecty(e.c1().shrink_point(0.05)));
 
+		},
+		drawt_svg: function()
+		{
+			var data = mesh.half_edges();
+			var lines = d3.select('#texture').selectAll('line')
+				.data(data);
+
+			lines.enter().append('line')
+				.attr('stroke-width', 1)
+				.attr('stroke', '#48c');
+
+			lines.exit().remove();
+
+			d3.select('#texture').selectAll('line')
+				.attr('x1', e => 256 + 128 * e.c0().shrink_vt(0.05).s)
+				.attr('y1', e => 256 + 128 * e.c0().shrink_vt(0.05).t)
+				.attr('x2', e => 256 + 128 * e.c1().shrink_vt(0.05).s)
+				.attr('y2', e => 256 + 128 * e.c1().shrink_vt(0.05).t);
 		}
 	};
 
@@ -296,7 +325,7 @@ function projectx(p)
 {
 	var origin = Point3(0,0,0);
 	var distance = Vector3(0,0,12);
-	return 512 + 1280 * p.vector_from(origin).mulm(view_matrix).add(distance).projectx();
+	return 256 + 1280 * p.vector_from(origin).mulm(view_matrix).add(distance).projectx();
 }
 
 function projecty(p)
@@ -327,8 +356,9 @@ function main()
 		.triangle(0,3,2)
 		.triangle(3,1,2);
 	main_mesh.draw3_svg();
+	main_mesh.drawt_svg();
 
-	d3.select('svg')
+	d3.select('#threed')
 		.call(d3.drag().on('drag', dragged));
 }
 
