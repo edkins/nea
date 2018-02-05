@@ -119,6 +119,48 @@ function PointT(s,t)
 	return point;
 }
 
+function AffineT(ss,st,s1,ts,tt,t1)
+{
+	var a = {
+		ss:ss,
+		st:st,
+		s1:s1,
+		ts:ts,
+		tt:tt,
+		t1:t1,
+
+		mul:function(o)
+		{
+			return AffineT(
+				a.ss * o.ss + a.st * o.ts,
+				a.ss * o.st + a.st * o.tt,
+				a.ss * o.s1 + a.st * o.t1 + a.s1,
+
+				a.ts * o.ss + a.tt * o.ts,
+				a.ts * o.st + a.tt * o.tt,
+				a.ts * o.s1 + a.tt * o.t1 + a.t1);
+		},
+		mulp:function(p)
+		{
+			return PointT(a.ss * p.s + a.st * p.t + a.s1, a.ts * p.s + a.tt * p.t + a.t1);
+		},
+		inv:function()
+		{
+			var d = a.ss * a.tt - a.st * a.ts;
+			return AffineT(
+				a.tt / d,
+				-a.st / d,
+				(a.st * a.t1 - a.tt * a.s1) / d,
+
+				-a.ts / d,
+				a.ss / d,
+				(a.ts * a.s1 - a.ss * a.t1) / d);
+		}
+	};
+
+	return a;
+}
+
 function HalfEdge(triangle,cindex0)
 {
 	var edge = {
@@ -151,6 +193,13 @@ function HalfEdge(triangle,cindex0)
 		middle: function()
 		{
 			return edge.v0().slide_to(edge.v1(), 0.5);
+		},
+		distance3: function()
+		{
+			var x = edge.v0().x - edge.v1().x;
+			var y = edge.v0().y - edge.v1().y;
+			var z = edge.v0().z - edge.v1().z;
+			return Math.sqrt(x * x + y * y + z * z);
 		}
 	};
 	return edge;
@@ -181,14 +230,50 @@ function Corner(triangle,cindex,vtindex)
 		},
 		angle: function()
 		{
-			if (corner.angle !== undefined)
+			if (corner.a !== undefined)
 			{
-				return corner.angle;
+				return corner.a;
 			}
 			var vec0 = corner.next().v3().vector_from(corner.v3());
 			var vec1 = corner.prev().v3().vector_from(corner.v3());
 
-			return Math.acos(vec0.dot(vec1) / vec0.distance() / vec1.distance());
+			corner.a = Math.acos(vec0.dot(vec1) / vec0.distance() / vec1.distance());
+			return corner.a;
+		},
+		prev_edge: function()
+		{
+			return triangle.half_edges[(cindex + 2) % 3];
+		},
+		next_edge: function()
+		{
+			return triangle.half_edges[cindex];
+		},
+		progress_around_vertex: function()
+		{
+			console.log('Progressing around vertex ' + corner.v3index);
+			return triangle.mesh.find_other_half_edge(corner.next_edge()).c1();
+		},
+		transformation_to_vertex_space: function()
+		{
+			if (corner.vstrans === undefined)
+			{
+				var p = corner.vt();
+				var pn = corner.next().vt();
+				var pp = corner.prev().vt();
+
+				var a = AffineT(pn.s - p.s, pp.s - p.s, p.s, pn.t - p.t, pp.t - p.t, p.t);
+
+				var space = triangle.mesh.vertex_space(corner.v3index);
+				var an = space.corner_angle_n(corner);
+				var ap = space.corner_angle_p(corner);
+				var dn = corner.next_edge().distance3();
+				var dp = corner.prev_edge().distance3();
+
+				var a2 = AffineT(Math.cos(an) * dn, Math.cos(ap) * dp, 0, Math.sin(an) * dn, Math.sin(ap) * dp, 0);
+
+				corner.vstrans = a2.mul(a.inv());
+			}
+			return corner.vstrans;
 		},
 		shrink_point: function(a)
 		{
@@ -220,6 +305,30 @@ function Triangle(mesh,index0,index1,index2)
 				(triangle.corners[0].vt().s + triangle.corners[1].vt().s + triangle.corners[2].vt().s) / 3,
 				(triangle.corners[0].vt().t + triangle.corners[1].vt().t + triangle.corners[2].vt().t) / 3
 			);
+		},
+		find_corner: function(v3index)
+		{
+			for (var i = 0; i < 3; i++)
+			{
+				if (triangle.corners[i].v3index === v3index)
+				{
+					return triangle.corners[i];
+				}
+			}
+			return undefined;
+		},
+		find_other_half_edge: function(half_edge)
+		{
+			var ind0 = half_edge.c1().v3index;
+			var ind1 = half_edge.c0().v3index;
+			for (var i = 0; i < 3; i++)
+			{
+				if (triangle.half_edges[i].c0().v3index === ind0 && triangle.half_edges[i].c1().v3index === ind1)
+				{
+					return triangle.half_edges[i];
+				}
+			}
+			return undefined;
 		}
 	};
 	triangle.corners = [
@@ -235,6 +344,57 @@ function Triangle(mesh,index0,index1,index2)
 	return triangle;
 }
 
+function VertexSpace(mesh, v3index)
+{
+	console.log('VertexSpace for ' + v3index);
+	var first_corner = mesh.find_first_corner(v3index);
+	var corners = [];
+	var corner = first_corner;
+	var total_angle = 0;
+
+	do
+	{
+		corners.push(corner);
+		total_angle += corner.angle();
+		corner = corner.progress_around_vertex();
+	} while (corner !== first_corner);
+
+	var angles = [0];
+	var angle = 0;
+	for (var corner of corners)
+	{
+		angle += corner.angle() * 2 * Math.PI / total_angle;
+		angles.push(angle);
+	}
+	var space = {
+		corners: corners,
+		angles: angles,
+		corner_angle_p : function(corner)
+		{
+			for (var i = 0; i < corners.length; i++)
+			{
+				if (space.corners[i] === corner)
+				{
+					return space.angles[i];
+				}
+			}
+			return undefined;
+		},
+		corner_angle_n : function(corner)
+		{
+			for (var i = 0; i < corners.length; i++)
+			{
+				if (space.corners[i] === corner)
+				{
+					return space.angles[i+1];
+				}
+			}
+			return undefined;
+		}
+	};
+	return space;
+}
+
 function Mesh()
 {
 	var mesh = {
@@ -242,6 +402,7 @@ function Mesh()
 		vt: [],
 		vt_to_v3_index: [],
 		tri: [],
+		vertex_spaces: {},
 
 		vertex: function(x,y,z,s,t) {
 			var v3index = mesh.v3.length;
@@ -271,6 +432,40 @@ function Mesh()
 				for (var edge of triangle.half_edges)
 				{
 					result.push(edge);
+				}
+			}
+			return result;
+		},
+		vertex_space: function(v3index) {
+			if (!(v3index in mesh.vertex_spaces))
+			{
+				mesh.vertex_spaces[v3index] = VertexSpace(mesh,v3index);
+			}
+			return mesh.vertex_spaces[v3index];
+		},
+		find_first_corner: function(v3index) {
+			for (var triangle of mesh.tri)
+			{
+				var corner = triangle.find_corner(v3index);
+				if (corner !== undefined)
+				{
+					return corner;
+				}
+			}
+			return undefined;
+		},
+		find_other_half_edge: function(half_edge) {
+			var result = undefined;
+			for (var triangle of mesh.tri)
+			{
+				var result2 = triangle.find_other_half_edge(half_edge);
+				if (result2 !== undefined)
+				{
+					if (result !== undefined)
+					{
+						throw 'Duplicate edges discovered';
+					}
+					result = result2;
 				}
 			}
 			return result;
@@ -310,10 +505,34 @@ function Mesh()
 				.attr('y1', e => 256 + 128 * e.c0().shrink_vt(0.05).t)
 				.attr('x2', e => 256 + 128 * e.c1().shrink_vt(0.05).s)
 				.attr('y2', e => 256 + 128 * e.c1().shrink_vt(0.05).t);
+		},
+		drawv_svg: function(v3index)
+		{
+			var data = mesh.half_edges().filter(e => e.triangle.find_corner(v3index) !== undefined);
+			var lines = d3.select('#vertex').selectAll('line')
+				.data(data);
+
+			lines.enter().append('line')
+				.attr('stroke-width', 1)
+				.attr('stroke', '#48c');
+
+			lines.exit().remove();
+
+			d3.select('#vertex').selectAll('line')
+				.attr('x1', e => 256 + 128 * corner_vspace(v3index,e.c0()).s)
+				.attr('y1', e => 256 + 128 * corner_vspace(v3index,e.c0()).t)
+				.attr('x2', e => 256 + 128 * corner_vspace(v3index,e.c1()).s)
+				.attr('y2', e => 256 + 128 * corner_vspace(v3index,e.c1()).t);
 		}
 	};
 
 	return mesh;
+}
+
+function corner_vspace(v3index,corner)
+{
+	var corner2 = corner.triangle.find_corner(v3index);
+	return corner2.transformation_to_vertex_space().mulp(corner.shrink_vt(0.05));
 }
 
 function edge_thickness(e)
@@ -357,6 +576,9 @@ function main()
 		.triangle(3,1,2);
 	main_mesh.draw3_svg();
 	main_mesh.drawt_svg();
+	main_mesh.drawv_svg(3);
+
+	var space = main_mesh.vertex_space(3);
 
 	d3.select('#threed')
 		.call(d3.drag().on('drag', dragged));
@@ -364,7 +586,7 @@ function main()
 
 function dragged()
 {
-	view_matrix = matrix3_rotate_xy(d3.event.dx / 100, d3.event.dy / 100).mul(view_matrix);
+	view_matrix = matrix3_rotate_xy(-d3.event.dx / 100, -d3.event.dy / 100).mul(view_matrix);
 	main_mesh.draw3_svg();
 }
 
