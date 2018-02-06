@@ -225,7 +225,11 @@ function HalfEdge(triangle,cindex0)
 		},
 		opposite: function()
 		{
-			return triangle.mesh.find_other_half_edge(edge);
+			if (edge.op === undefined)
+			{
+				edge.op = triangle.mesh.find_other_half_edge(edge);
+			}
+			return edge.op;
 		},
 		along_st: function(a)
 		{
@@ -278,9 +282,13 @@ function Corner(triangle,cindex,vtindex)
 		{
 			return triangle.half_edges[cindex];
 		},
-		progress_around_vertex: function()
+		next_around_vertex: function()
 		{
 			return triangle.mesh.find_other_half_edge(corner.next_edge()).c1();
+		},
+		prev_around_vertex: function()
+		{
+			return triangle.mesh.find_other_half_edge(corner.prev_edge()).c0();
 		},
 		transformation_to_vertex_space: function()
 		{
@@ -303,6 +311,28 @@ function Corner(triangle,cindex,vtindex)
 				corner.vstrans = a2.mul(a.inv());
 			}
 			return corner.vstrans;
+		},
+		transformation_to_next: function()
+		{
+			if (corner.ntrans === undefined)
+			{
+				var a = corner.transformation_to_vertex_space();
+				var a2 = corner.next_around_vertex().transformation_to_vertex_space();
+
+				corner.ntrans = a2.inv().mul(a);
+			}
+			return corner.ntrans;
+		},
+		transformation_to_prev: function()
+		{
+			if (corner.ptrans === undefined)
+			{
+				var a = corner.transformation_to_vertex_space();
+				var a2 = corner.prev_around_vertex().transformation_to_vertex_space();
+
+				corner.ptrans = a2.inv().mul(a);
+			}
+			return corner.ptrans;
 		},
 		shrink_point: function(a)
 		{
@@ -432,7 +462,7 @@ function VertexSpace(mesh, v3index)
 	{
 		corners.push(corner);
 		total_angle += corner.angle();
-		corner = corner.progress_around_vertex();
+		corner = corner.next_around_vertex();
 	} while (corner !== first_corner);
 
 	var angles = [0];
@@ -587,10 +617,10 @@ function Mesh()
 
 			d3.select('#texture').selectAll('line')
 				.attr('stroke', e => e == highlight_edge ? '#f00' : '#48c')
-				.attr('x1', e => 256 + 128 * e.c0().shrink_vt(0.05).s)
-				.attr('y1', e => 256 + 128 * e.c0().shrink_vt(0.05).t)
-				.attr('x2', e => 256 + 128 * e.c1().shrink_vt(0.05).s)
-				.attr('y2', e => 256 + 128 * e.c1().shrink_vt(0.05).t);
+				.attr('x1', e => projects(e.c0().shrink_vt(0.05)))
+				.attr('y1', e => projectt(e.c0().shrink_vt(0.05)))
+				.attr('x2', e => projects(e.c1().shrink_vt(0.05)))
+				.attr('y2', e => projectt(e.c1().shrink_vt(0.05)));
 		},
 		drawv_svg: function(v3index)
 		{
@@ -709,7 +739,11 @@ function PathSegment(triangle, st0, st1)
 
 			return [edge, a];
 		},
-		next_segment:function()
+		along_st: function(a)
+		{
+			return segment.st0.slide_to(segment.st1, a);
+		},
+		next_segment: function()
 		{
 			var pair = segment.extend_to_edge();
 			if (pair === undefined)
@@ -719,9 +753,17 @@ function PathSegment(triangle, st0, st1)
 			var edge = pair[0];
 			var a = pair[1];
 			var edge2 = edge.opposite();
+			if (edge2 === undefined)
+			{
+				return undefined;
+			}
 
-			console.log(segment.st1);
-			console.log(edge.along_st(a));
+			var st2 = segment.along_st(2);
+			var modified_st1 = edge.c0().transformation_to_next().mulp(st1);
+			var modified_st2 = edge.c0().transformation_to_next().mulp(st2);
+
+			return PathSegment(edge2.triangle, modified_st1, modified_st2);
+			//return PathSegment(edge.triangle, segment.st1, st2);
 		}
 	};
 	return segment;
@@ -754,16 +796,28 @@ function Path(segments)
 				.data(path.segments);
 
 			lines.enter().append('line')
-				.attr('stroke', '#c00');
+				.attr('stroke', 'rgba(192,0,0,0.5)');
 
 			lines.exit().remove();
 
 			d3.select('#texture_path').selectAll('line')
 				.attr('stroke-width', 1)
-				.attr('x1', s => 256 + 128 * s.st0.s)
-				.attr('y1', s => 256 + 128 * s.st0.t)
-				.attr('x2', s => 256 + 128 * s.st1.s)
-				.attr('y2', s => 256 + 128 * s.st1.t);
+				.attr('x1', s => projects(s.st0))
+				.attr('y1', s => projectt(s.st0))
+				.attr('x2', s => projects(s.st1))
+				.attr('y2', s => projectt(s.st1));
+
+			var points = d3.select('#texture_path').selectAll('circle').data(path.segments);
+
+			points.enter().append('circle')
+				.attr('fill', '#c00')
+				.attr('r', 2);
+
+			points.exit().remove();
+
+			d3.select('#texture_path').selectAll('circle')
+				.attr('cx', s => projects(s.st1))
+				.attr('cy', s => projectt(s.st1));
 		},
 		drawv_svg: function(v3index)
 		{
@@ -773,7 +827,7 @@ function Path(segments)
 
 			lines.enter().append('line')
 				.attr('stroke-width', 1)
-				.attr('stroke', '#c00');
+				.attr('stroke', 'rgba(192,0,0,0.5)');
 
 			lines.exit().remove();
 
@@ -785,6 +839,15 @@ function Path(segments)
 		}
 	};
 	return path;
+}
+
+function projects(st)
+{
+	return 256 + 1024 * st.s;
+}
+function projectt(st)
+{
+	return -256 + 1024 * st.t;
 }
 
 function locate_path_segment(mesh, st0, st1)
@@ -828,10 +891,17 @@ function main()
 			main_mesh.triangle(base+1, base+18, base+17);
 		}
 	}
-	var path_seg = locate_path_segment(main_mesh, PointT(0.10,0.451), PointT(0.099,0.452));
+	var path_seg = locate_path_segment(main_mesh, PointT(0.10,0.451), PointT(0.0991,0.452));
 	var path_edge = path_seg.extend_to_edge()[0];
-	path_seg.next_segment();
-	main_path = Path([path_seg]);
+	var path_seg2 = path_seg.next_segment();
+	var path_segs = [path_seg, path_seg2];
+	for (var i = 0; i < 0; i++)
+	{
+		path_seg2 = path_seg2.next_segment();
+		path_segs.push(path_seg2);
+	}
+	//path_seg2.extend_to_edge();
+	main_path = Path(path_segs);
 	main_path.draw3_svg();
 	main_path.drawt_svg();
 	main_path.drawv_svg(path_edge.c0().v3index);
