@@ -155,6 +155,18 @@ function AffineT(ss,st,s1,ts,tt,t1)
 				-a.ts / d,
 				a.ss / d,
 				(a.ts * a.s1 - a.ss * a.t1) / d);
+		},
+		blend:function(o,i)
+		{
+			var j = 1 - i;
+			return AffineT(
+				a.ss * j + o.ss * i,
+				a.st * j + o.st * i,
+				a.s1 * j + o.s1 * i,
+
+				a.ts * j + o.ts * i,
+				a.tt * j + o.tt * i,
+				a.t1 * j + o.t1 * i);
 		}
 	};
 
@@ -234,6 +246,12 @@ function HalfEdge(triangle,cindex0)
 		along_st: function(a)
 		{
 			return edge.vt0().slide_to(edge.vt1(),a);
+		},
+		transformation_along: function(a)
+		{
+			var a0 = edge.c0().transformation_to_next();
+			var a1 = edge.c1().transformation_to_prev();
+			return a0.blend(a1, a);
 		}
 	};
 	return edge;
@@ -746,7 +764,7 @@ function PathSegment(triangle, st0, st1)
 		next_segment: function()
 		{
 			var pair = segment.extend_to_edge();
-			if (pair === undefined)
+			if (pair[0] === undefined)
 			{
 				throw 'Does not hit an edge';
 			}
@@ -759,11 +777,11 @@ function PathSegment(triangle, st0, st1)
 			}
 
 			var st2 = segment.along_st(2);
-			var modified_st1 = edge.c0().transformation_to_next().mulp(st1);
-			var modified_st2 = edge.c0().transformation_to_next().mulp(st2);
+			var a = edge.transformation_along(a);
+			var modified_st1 = a.mulp(segment.st1);
+			var modified_st2 = a.mulp(st2);
 
 			return PathSegment(edge2.triangle, modified_st1, modified_st2);
-			//return PathSegment(edge.triangle, segment.st1, st2);
 		}
 	};
 	return segment;
@@ -806,18 +824,6 @@ function Path(segments)
 				.attr('y1', s => projectt(s.st0))
 				.attr('x2', s => projects(s.st1))
 				.attr('y2', s => projectt(s.st1));
-
-			var points = d3.select('#texture_path').selectAll('circle').data(path.segments);
-
-			points.enter().append('circle')
-				.attr('fill', '#c00')
-				.attr('r', 2);
-
-			points.exit().remove();
-
-			d3.select('#texture_path').selectAll('circle')
-				.attr('cx', s => projects(s.st1))
-				.attr('cy', s => projectt(s.st1));
 		},
 		drawv_svg: function(v3index)
 		{
@@ -843,11 +849,11 @@ function Path(segments)
 
 function projects(st)
 {
-	return 256 + 1024 * st.s;
+	return 256 + 256 * st.s;
 }
 function projectt(st)
 {
-	return -256 + 1024 * st.t;
+	return 256 + 256 * st.t;
 }
 
 function locate_path_segment(mesh, st0, st1)
@@ -866,7 +872,7 @@ var view_matrix = Matrix3(1,0,0, 0,1,0, 0,0,1);
 
 function bump(s,t)
 {
-	return Point3(s,t,Math.exp(-4*(s*s+t*t)));
+	return Point3(s,t,3 * Math.exp(-4*(s*s+t*t)));
 }
 
 function main()
@@ -891,23 +897,27 @@ function main()
 			main_mesh.triangle(base+1, base+18, base+17);
 		}
 	}
-	var path_seg = locate_path_segment(main_mesh, PointT(0.10,0.451), PointT(0.0991,0.452));
+	var path_seg = locate_path_segment(main_mesh, PointT(-0.8,-0.8), PointT(-0.0,-0.3));
 	var path_edge = path_seg.extend_to_edge()[0];
 	var path_seg2 = path_seg.next_segment();
 	var path_segs = [path_seg, path_seg2];
-	for (var i = 0; i < 0; i++)
+	for (var i = 0; i < 80; i++)
 	{
 		path_seg2 = path_seg2.next_segment();
+		if (path_seg2 === undefined)
+		{
+			break;
+		}
 		path_segs.push(path_seg2);
 	}
-	//path_seg2.extend_to_edge();
+	path_seg2.extend_to_edge();
 	main_path = Path(path_segs);
 	main_path.draw3_svg();
 	main_path.drawt_svg();
 	main_path.drawv_svg(path_edge.c0().v3index);
 	
 	main_mesh.draw3_svg();
-	main_mesh.drawt_svg(path_edge);
+	main_mesh.drawt_svg();
 	main_mesh.drawv_svg(path_edge.c0().v3index);
 
 	d3.select('#threed_bg')
