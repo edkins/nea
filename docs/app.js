@@ -725,7 +725,7 @@ function project_thickness(p)
 {
 	var origin = Point3(0,0,0);
 	var z = p.vector_from(origin).mulm(view_matrix).z;
-	return Math.min(10, Math.max(0.2, 1 / (1.5 + z)));
+	return Math.max(0.2, 1 / Math.max(0.2,1.5 + z));
 }
 
 function PathSegment(triangle, st0, st1)
