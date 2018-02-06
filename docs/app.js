@@ -222,6 +222,14 @@ function HalfEdge(triangle,cindex0)
 			var y = edge.v0().y - edge.v1().y;
 			var z = edge.v0().z - edge.v1().z;
 			return Math.sqrt(x * x + y * y + z * z);
+		},
+		opposite: function()
+		{
+			return triangle.mesh.find_other_half_edge(edge);
+		},
+		along_st: function(a)
+		{
+			return edge.vt0().slide_to(edge.vt1(),a);
 		}
 	};
 	return edge;
@@ -393,7 +401,11 @@ function Triangle(mesh,index0,index1,index2)
 				triangle.corners[0].v3().z);
 
 			return a3.mulp( triangle.st_to_rat(st) );
-
+		},
+		contains_st: function(st)
+		{
+			var rat = triangle.st_to_rat(st);
+			return (rat.s >= 0 && rat.t >= 0 && rat.s + rat.t <= 1);
 		}
 	};
 	triangle.corners = [
@@ -534,6 +546,16 @@ function Mesh()
 			}
 			return result;
 		},
+		find_triangle_from_st: function(st) {
+			for (var triangle of mesh.tri)
+			{
+				if (triangle.contains_st(st))
+				{
+					return triangle;
+				}
+			}
+			return undefined;
+		},
 		draw3_svg: function() {
 			var data = mesh.half_edges();
 			var lines = d3.select('#threed').selectAll('line')
@@ -552,7 +574,7 @@ function Mesh()
 				.attr('y2', e => projecty(e.c1().shrink_point(0.05)));
 
 		},
-		drawt_svg: function()
+		drawt_svg: function(highlight_edge)
 		{
 			var data = mesh.half_edges();
 			var lines = d3.select('#texture').selectAll('line')
@@ -560,11 +582,11 @@ function Mesh()
 
 			lines.enter().append('line')
 				.attr('stroke-width', 1)
-				.attr('stroke', '#48c');
 
 			lines.exit().remove();
 
 			d3.select('#texture').selectAll('line')
+				.attr('stroke', e => e == highlight_edge ? '#f00' : '#48c')
 				.attr('x1', e => 256 + 128 * e.c0().shrink_vt(0.05).s)
 				.attr('y1', e => 256 + 128 * e.c0().shrink_vt(0.05).t)
 				.attr('x2', e => 256 + 128 * e.c1().shrink_vt(0.05).s)
@@ -583,10 +605,10 @@ function Mesh()
 			lines.exit().remove();
 
 			d3.select('#vertex').selectAll('line')
-				.attr('x1', e => 256 + 128 * corner_vspace(v3index,e.c0()).s)
-				.attr('y1', e => 256 + 128 * corner_vspace(v3index,e.c0()).t)
-				.attr('x2', e => 256 + 128 * corner_vspace(v3index,e.c1()).s)
-				.attr('y2', e => 256 + 128 * corner_vspace(v3index,e.c1()).t);
+				.attr('x1', e => 256 + 1280 * corner_vspace(v3index,e.c0()).s)
+				.attr('y1', e => 256 + 1280 * corner_vspace(v3index,e.c0()).t)
+				.attr('x2', e => 256 + 1280 * corner_vspace(v3index,e.c1()).s)
+				.attr('y2', e => 256 + 1280 * corner_vspace(v3index,e.c1()).t);
 		}
 	};
 
@@ -597,6 +619,12 @@ function corner_vspace(v3index,corner)
 {
 	var corner2 = corner.triangle.find_corner(v3index);
 	return corner2.transformation_to_vertex_space().mulp(corner.shrink_vt(0.05));
+}
+
+function st_vspace(v3index,triangle,st)
+{
+	var corner = triangle.find_corner(v3index);
+	return corner.transformation_to_vertex_space().mulp(st);
 }
 
 function projectx(p)
@@ -644,20 +672,56 @@ function PathSegment(triangle, st0, st1)
 			var rat1 = triangle.st_to_rat(segment.st1);
 
 			var t = 1000000;
-			if (rat1.s < rat0.s)
-			{
-				t = Math.min(t, rat0.s / (rat0.s - rat1.s));
-			}
+			var edge = undefined;
+			var a = undefined;
 			if (rat1.t < rat0.t)
 			{
-				t = Math.min(t, rat0.t / (rat0.t - rat1.t));
+				var target = rat0.t / (rat0.t - rat1.t);
+				if (target < t)
+				{
+					t = target;
+					edge = triangle.half_edges[0];
+					a = rat0.s + t * (rat1.s - rat0.s);
+				}
 			}
 			if (rat1.s + rat1.t > rat0.s + rat0.t)
 			{
-				t = Math.min(t, (1 - rat0.s - rat0.t) / (rat1.s + rat1.t - rat0.s - rat0.t));
+				var target = (1 - rat0.s - rat0.t) / (rat1.s + rat1.t - rat0.s - rat0.t);
+				if (target < t)
+				{
+					t = target;
+					edge = triangle.half_edges[1];
+					a = rat0.t + t * (rat1.t - rat0.t);
+				}
+			}
+			if (rat1.s < rat0.s)
+			{
+				var target = rat0.s / (rat0.s - rat1.s);
+				if (target < t)
+				{
+					t = target;
+					edge = triangle.half_edges[2];
+					a = 1 - rat0.t - t * (rat1.t - rat0.t);
+				}
 			}
 			var rat = rat0.slide_to(rat1, t);
 			segment.st1 = triangle.rat_to_st(rat);
+
+			return [edge, a];
+		},
+		next_segment:function()
+		{
+			var pair = segment.extend_to_edge();
+			if (pair === undefined)
+			{
+				throw 'Does not hit an edge';
+			}
+			var edge = pair[0];
+			var a = pair[1];
+			var edge2 = edge.opposite();
+
+			console.log(segment.st1);
+			console.log(edge.along_st(a));
 		}
 	};
 	return segment;
@@ -700,34 +764,81 @@ function Path(segments)
 				.attr('y1', s => 256 + 128 * s.st0.t)
 				.attr('x2', s => 256 + 128 * s.st1.s)
 				.attr('y2', s => 256 + 128 * s.st1.t);
+		},
+		drawv_svg: function(v3index)
+		{
+			var data = path.segments.filter(s => s.triangle.find_corner(v3index) !== undefined);
+			var lines = d3.select('#vertex_path').selectAll('line')
+				.data(data);
+
+			lines.enter().append('line')
+				.attr('stroke-width', 1)
+				.attr('stroke', '#c00');
+
+			lines.exit().remove();
+
+			d3.select('#vertex_path').selectAll('line')
+				.attr('x1', s => 256 + 1280 * st_vspace(v3index,s.triangle,s.st0).s)
+				.attr('y1', s => 256 + 1280 * st_vspace(v3index,s.triangle,s.st0).t)
+				.attr('x2', s => 256 + 1280 * st_vspace(v3index,s.triangle,s.st1).s)
+				.attr('y2', s => 256 + 1280 * st_vspace(v3index,s.triangle,s.st1).t);
 		}
 	};
 	return path;
+}
+
+function locate_path_segment(mesh, st0, st1)
+{
+	var triangle = mesh.find_triangle_from_st(st0);
+	if (triangle === undefined)
+	{
+		throw "Cannot find triangle containing path segment";
+	}
+	return PathSegment(triangle, st0, st1);
 }
 
 var main_mesh = undefined;
 var main_path = undefined;
 var view_matrix = Matrix3(1,0,0, 0,1,0, 0,0,1);
 
+function bump(s,t)
+{
+	return Point3(s,t,Math.exp(-4*(s*s+t*t)));
+}
+
 function main()
 {
-	main_mesh = Mesh()
-		.vertex(-1,-1,-1,0,   0)
-		.vertex( 1, 1,-1,0,   1)
-		.vertex(-1, 1,1, 1,   1)
-		.vertex( 1,-1,1, 0.25,0.75)
-		.triangle(0,1,3)
-		.triangle(0,3,2)
-		.triangle(3,1,2);
-	main_mesh.draw3_svg();
-	main_mesh.drawt_svg();
-	main_mesh.drawv_svg(3);
-
-	var path_seg = PathSegment(main_mesh.tri[0], PointT(0.125,0.5), PointT(0.13,0.55));
-	path_seg.extend_to_edge();
+	main_mesh = Mesh();
+	for (var i = 0; i <= 16; i++)
+	{
+		for (var j = 0; j <= 16; j++)
+		{
+			var s = i / 8 - 1;
+			var t = j / 8 - 1;
+			var p = bump(s,t);
+			main_mesh.vertex(p.x, p.y, p.z, s, t);
+		}
+	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 17 * i + j;
+			main_mesh.triangle(base, base+1, base+17);
+			main_mesh.triangle(base+1, base+18, base+17);
+		}
+	}
+	var path_seg = locate_path_segment(main_mesh, PointT(0.10,0.451), PointT(0.099,0.452));
+	var path_edge = path_seg.extend_to_edge()[0];
+	path_seg.next_segment();
 	main_path = Path([path_seg]);
 	main_path.draw3_svg();
 	main_path.drawt_svg();
+	main_path.drawv_svg(path_edge.c0().v3index);
+	
+	main_mesh.draw3_svg();
+	main_mesh.drawt_svg(path_edge);
+	main_mesh.drawv_svg(path_edge.c0().v3index);
 
 	d3.select('#threed_bg')
 		.call(d3.drag().on('drag', dragged));
