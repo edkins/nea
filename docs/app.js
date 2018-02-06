@@ -351,7 +351,7 @@ function Triangle(mesh,index0,index1,index2)
 			}
 			return undefined;
 		},
-		st_to_xyz: function(st)
+		st_to_rat: function(st)
 		{
 			var a = AffineT(
 				triangle.corners[1].vt().s - triangle.corners[0].vt().s,
@@ -362,6 +362,23 @@ function Triangle(mesh,index0,index1,index2)
 				triangle.corners[2].vt().t - triangle.corners[0].vt().t,
 				triangle.corners[0].vt().t).inv();
 
+			return a.mulp(st);
+		},
+		rat_to_st: function(rat)
+		{
+			var a = AffineT(
+				triangle.corners[1].vt().s - triangle.corners[0].vt().s,
+				triangle.corners[2].vt().s - triangle.corners[0].vt().s,
+				triangle.corners[0].vt().s,
+
+				triangle.corners[1].vt().t - triangle.corners[0].vt().t,
+				triangle.corners[2].vt().t - triangle.corners[0].vt().t,
+				triangle.corners[0].vt().t);
+
+			return a.mulp(rat);
+		},
+		st_to_xyz: function(st)
+		{
 			var a3 = Affine3T(
 				triangle.corners[1].v3().x - triangle.corners[0].v3().x,
 				triangle.corners[2].v3().x - triangle.corners[0].v3().x,
@@ -375,7 +392,7 @@ function Triangle(mesh,index0,index1,index2)
 				triangle.corners[2].v3().z - triangle.corners[0].v3().z,
 				triangle.corners[0].v3().z);
 
-			return a3.mulp( a.mulp(st) );
+			return a3.mulp( triangle.st_to_rat(st) );
 
 		}
 	};
@@ -611,15 +628,36 @@ function PathSegment(triangle, st0, st1)
 		st1:st1,
 		xyz0:function()
 		{
-			return triangle.st_to_xyz(st0);
+			return triangle.st_to_xyz(segment.st0);
 		},
 		xyz1:function()
 		{
-			return triangle.st_to_xyz(st1);
+			return triangle.st_to_xyz(segment.st1);
 		},
 		xyz_middle:function()
 		{
 			return segment.xyz0().slide_to(segment.xyz1(),0.5);
+		},
+		extend_to_edge:function()
+		{
+			var rat0 = triangle.st_to_rat(segment.st0);
+			var rat1 = triangle.st_to_rat(segment.st1);
+
+			var t = 1000000;
+			if (rat1.s < rat0.s)
+			{
+				t = Math.min(t, rat0.s / (rat0.s - rat1.s));
+			}
+			if (rat1.t < rat0.t)
+			{
+				t = Math.min(t, rat0.t / (rat0.t - rat1.t));
+			}
+			if (rat1.s + rat1.t > rat0.s + rat0.t)
+			{
+				t = Math.min(t, (1 - rat0.s - rat0.t) / (rat1.s + rat1.t - rat0.s - rat0.t));
+			}
+			var rat = rat0.slide_to(rat1, t);
+			segment.st1 = triangle.rat_to_st(rat);
 		}
 	};
 	return segment;
@@ -645,6 +683,23 @@ function Path(segments)
 				.attr('y1', s => projecty(s.xyz0()))
 				.attr('x2', s => projectx(s.xyz1()))
 				.attr('y2', s => projecty(s.xyz1()))
+		},
+		drawt_svg:function()
+		{
+			var lines = d3.select('#texture_path').selectAll('line')
+				.data(path.segments);
+
+			lines.enter().append('line')
+				.attr('stroke', '#c00');
+
+			lines.exit().remove();
+
+			d3.select('#texture_path').selectAll('line')
+				.attr('stroke-width', 1)
+				.attr('x1', s => 256 + 128 * s.st0.s)
+				.attr('y1', s => 256 + 128 * s.st0.t)
+				.attr('x2', s => 256 + 128 * s.st1.s)
+				.attr('y2', s => 256 + 128 * s.st1.t);
 		}
 	};
 	return path;
@@ -658,9 +713,9 @@ function main()
 {
 	main_mesh = Mesh()
 		.vertex(-1,-1,-1,0,   0)
-		.vertex( 1, 1,-1,1,   0)
+		.vertex( 1, 1,-1,0,   1)
 		.vertex(-1, 1,1, 1,   1)
-		.vertex( 1,-1,1, 0.75,0.25)
+		.vertex( 1,-1,1, 0.25,0.75)
 		.triangle(0,1,3)
 		.triangle(0,3,2)
 		.triangle(3,1,2);
@@ -668,8 +723,11 @@ function main()
 	main_mesh.drawt_svg();
 	main_mesh.drawv_svg(3);
 
-	main_path = Path([PathSegment(main_mesh.tri[0], PointT(0.5,0.125), PointT(0.55,0.13))]);
+	var path_seg = PathSegment(main_mesh.tri[0], PointT(0.125,0.5), PointT(0.13,0.55));
+	path_seg.extend_to_edge();
+	main_path = Path([path_seg]);
 	main_path.draw3_svg();
+	main_path.drawt_svg();
 
 	d3.select('#threed_bg')
 		.call(d3.drag().on('drag', dragged));
