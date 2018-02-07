@@ -1079,7 +1079,7 @@ function maxabs(x,y)
 	return Math.max(Math.abs(x),Math.abs(y));
 }
 
-function model_sphere()
+function model_spheroid(a)
 {
 	main_mesh = Mesh();
 	for (var i = 0; i <= 16; i++)
@@ -1100,7 +1100,7 @@ function model_sphere()
 			}
 			else
 			{
-				var z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
+				var z = a * Math.sqrt(Math.max(0, 1 - x * x - y * y));
 				main_mesh.vertex(x, y, z, 0.5 * x - 0.5, 0.5 * y - 0.5);
 				main_mesh.vertex(x, y, -z, 0.5 * x + 0.5, 0.5 * y + 0.5);
 			}
@@ -1148,7 +1148,15 @@ function create_model(model)
 	}
 	else if (model === 'sphere')
 	{
-		model_sphere();
+		model_spheroid(1);
+	}
+	else if (model === 'oblate')
+	{
+		model_spheroid(0.5);
+	}
+	else if (model === 'prolate')
+	{
+		model_spheroid(2);
 	}
 	else
 	{
@@ -1173,7 +1181,7 @@ function create_path(st0, st1)
 	var path_edge = path_seg.extend_to_edge()[0];
 	var path_seg2 = path_seg.next_segment();
 	var path_segs = [path_seg, path_seg2];
-	for (var i = 0; i < 100; i++)
+	for (var i = 0; i < 300; i++)
 	{
 		path_seg2 = path_seg2.next_segment();
 		if (path_seg2 === undefined)
