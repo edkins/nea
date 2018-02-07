@@ -5,11 +5,17 @@
 		<script src="app.js"></script>
 	</head>
 	<body>
+		<select id="model" onchange="recreate_model()" value="bump">
+			<option value="bump">Bump</option>
+			<option value="wormhole">Wormhole</option>
+			<option value="saddle">Saddle</option>
+		</select>
+		<br>
 		<svg width="512" height="512" id="threed_bg">
 			<g id="threed"></g>
 			<g id="threed_path"></g>
 		</svg>
-		<svg width="512" height="512">
+		<svg width="512" height="512" id="texture_bg">
 			<g id="texture"></g>
 			<g id="texture_path"></g>
 		</svg>

@@ -892,6 +892,11 @@ function projectt(st)
 	return 256 + 256 * st.t;
 }
 
+function project_inverse_st(x,y)
+{
+	return PointT( (x-256)/256, (y-256)/256 );
+}
+
 function locate_path_segment(mesh, st0, st1)
 {
 	var triangle = mesh.find_triangle_from_st(st0);
@@ -906,7 +911,7 @@ var main_mesh = undefined;
 var main_path = undefined;
 var view_matrix = Matrix3(1,0,0, 0,1,0, 0,0,1);
 
-function main()
+function model_wormhole()
 {
 	main_mesh = Mesh();
 	for (var i = 0; i <= 16; i++)
@@ -936,7 +941,91 @@ function main()
 		main_mesh.triangle(base+16, base, base+17+16);
 		main_mesh.triangle(base, base+17, base+17+16);
 	}
-	var path_seg = locate_path_segment(main_mesh, PointT(-0.8,-0.8), PointT(-0.78,-0.789));
+}
+
+function model_bump()
+{
+	main_mesh = Mesh();
+	for (var i = 0; i <= 16; i++)
+	{
+		for (var j = 0; j <= 16; j++)
+		{
+			var s = i / 8 - 1;
+			var t = j / 8 - 1;
+			var p = Point3(s,t,3 * Math.exp(-4*(s*s+t*t)));
+			main_mesh.vertex(p.x, p.y, p.z, s, t);
+		}
+	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 17 * i + j;
+			main_mesh.triangle(base, base+1, base+17);
+			main_mesh.triangle(base+1, base+18, base+17);
+		}
+	}
+}
+
+
+function model_saddle()
+{
+	main_mesh = Mesh();
+	for (var i = 0; i <= 16; i++)
+	{
+		for (var j = 0; j <= 16; j++)
+		{
+			var s = i / 8 - 1;
+			var t = j / 8 - 1;
+			var p = Point3(s,t,s * t);
+			main_mesh.vertex(p.x, p.y, p.z, s, t);
+		}
+	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 17 * i + j;
+			main_mesh.triangle(base, base+1, base+17);
+			main_mesh.triangle(base+1, base+18, base+17);
+		}
+	}
+}
+
+function create_model(model)
+{
+	if (model === 'bump')
+	{
+		model_bump();
+	}
+	else if (model === 'wormhole')
+	{
+		model_wormhole();
+	}
+	else if (model === 'saddle')
+	{
+		model_saddle();
+	}
+	else
+	{
+		throw 'unknown model';
+	}
+}
+
+function recreate_model()
+{
+	var model = document.getElementById('model').value;
+	create_model(model);
+	create_path(path0, path1);
+	display_model();
+}
+
+var path0 = PointT(-0.8, -0.8);
+var path1 = PointT(-0.78, -0.789);
+
+function create_path(st0, st1)
+{
+	var path_seg = locate_path_segment(main_mesh, path0, path1);
 	var path_edge = path_seg.extend_to_edge()[0];
 	var path_seg2 = path_seg.next_segment();
 	var path_segs = [path_seg, path_seg2];
@@ -950,16 +1039,37 @@ function main()
 		path_segs.push(path_seg2);
 	}
 	main_path = Path(path_segs);
+}
+
+function recreate_path()
+{
+	create_path(path0,path1);
+
 	main_path.draw3_svg();
 	main_path.drawt_svg();
-	main_path.drawv_svg(path_edge.c0().v3index);
+}
+
+function display_model()
+{
+	main_path.draw3_svg();
+	main_path.drawt_svg();
 	
 	main_mesh.draw3_svg();
 	main_mesh.drawt_svg();
-	main_mesh.drawv_svg(path_edge.c0().v3index);
+}
+
+function main()
+{
+	recreate_model();
 
 	d3.select('#threed_bg')
 		.call(d3.drag().on('drag', dragged));
+
+	d3.select('#texture_bg')
+		.call(d3.drag()
+			.container(document.getElementById('texture_bg'))
+			.on('start', texture_drag_start)
+			.on('drag', texture_dragged));
 }
 
 function dragged()
@@ -967,6 +1077,19 @@ function dragged()
 	view_matrix = matrix3_rotate_xy(-d3.event.dx / 100, -d3.event.dy / 100).mul(view_matrix);
 	main_mesh.draw3_svg();
 	main_path.draw3_svg();
+}
+
+function texture_drag_start()
+{
+	path0 = project_inverse_st(d3.event.x, d3.event.y);
+	path1 = path0;
+	recreate_path();
+}
+
+function texture_dragged()
+{
+	path1 = project_inverse_st(d3.event.x, d3.event.y);
+	recreate_path();
 }
 
 window.onload = main;
