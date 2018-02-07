@@ -924,8 +924,7 @@ function model_wormhole()
 		var z = i / 8 - 1;
 		var radius = 0.2 + z * z * z * z;
 
-		main_mesh.vertex(radius, 0, z, s, -1);
-		for (var j = 1; j < 16; j++)
+		for (var j = 0; j < 16; j++)
 		{
 			var theta = j * Math.PI / 8;
 			var t = j / 8 - 1;
@@ -933,6 +932,40 @@ function model_wormhole()
 		}
 		main_mesh.split_vertex(17*i, s, 1);
 	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 17 * i + j;
+			main_mesh.triangle(base, base+1, base+17);
+			main_mesh.triangle(base+1, base+18, base+17);
+		}
+	}
+}
+
+function model_torus()
+{
+	main_mesh = Mesh();
+	for (var i = 0; i < 16; i++)
+	{
+		var s = i / 8 - 1;
+		var z = i / 8 - 1;
+		var theta2 = i * Math.PI / 8;
+
+		for (var j = 0; j < 16; j++)
+		{
+			var theta = j * Math.PI / 8;
+			var radius = 0.75 + Math.cos(theta) * 0.25;
+			var t = j / 8 - 1;
+			main_mesh.vertex(radius * Math.cos(theta2), radius * Math.sin(theta2), Math.sin(theta)*0.25, s, t);
+		}
+		main_mesh.split_vertex(17*i, s, 1);
+	}
+	for (var j = 0; j <= 16; j++)
+	{
+		main_mesh.split_vertex(j, 1, j/8-1);
+	}
+
 	for (var i = 0; i < 16; i++)
 	{
 		for (var j = 0; j < 16; j++)
@@ -1017,6 +1050,76 @@ function model_hyperbolic()
 	}
 }
 
+function model_cone()
+{
+	main_mesh = Mesh();
+	for (var i = 0; i <= 16; i++)
+	{
+		for (var j = 0; j <= 16; j++)
+		{
+			var s = i / 8 - 1;
+			var t = j / 8 - 1;
+			var p = Point3(s,t, 3 * Math.sqrt(s*s+t*t));
+			main_mesh.vertex(p.x, p.y, p.z, s, t);
+		}
+	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 17 * i + j;
+			main_mesh.triangle(base, base+1, base+17);
+			main_mesh.triangle(base+1, base+18, base+17);
+		}
+	}
+}
+
+function maxabs(x,y)
+{
+	return Math.max(Math.abs(x),Math.abs(y));
+}
+
+function model_sphere()
+{
+	main_mesh = Mesh();
+	for (var i = 0; i <= 16; i++)
+	{
+		for (var j = 0; j <= 16; j++)
+		{
+			var s = i / 8 - 1;
+			var t = j / 8 - 1;
+
+			var d = Math.sqrt(s * s + t * t + 1 - maxabs(s,t));
+			var x = s / d;
+			var y = t / d;
+
+			if (i == 0 || j == 0 || i == 16 || j == 16)
+			{
+				main_mesh.vertex(x, y, 0, 0.5 * x - 0.5, 0.5 * y - 0.5);
+				main_mesh.split_vertex(34 * i + 2 * j, 0.5 * x + 0.5, 0.5 * y + 0.5);
+			}
+			else
+			{
+				var z = Math.sqrt(Math.max(0, 1 - x * x - y * y));
+				main_mesh.vertex(x, y, z, 0.5 * x - 0.5, 0.5 * y - 0.5);
+				main_mesh.vertex(x, y, -z, 0.5 * x + 0.5, 0.5 * y + 0.5);
+			}
+		}
+	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 34 * i + 2 * j;
+			main_mesh.triangle(base, base+2, base+34);
+			main_mesh.triangle(base+2, base+36, base+34);
+
+			main_mesh.triangle(base+3, base+1, base+35);
+			main_mesh.triangle(base+37, base+3, base+35);
+		}
+	}
+}
+
 function create_model(model)
 {
 	if (model === 'bump')
@@ -1035,6 +1138,18 @@ function create_model(model)
 	{
 		model_hyperbolic();
 	}
+	else if (model === 'torus')
+	{
+		model_torus();
+	}
+	else if (model === 'cone')
+	{
+		model_cone();
+	}
+	else if (model === 'sphere')
+	{
+		model_sphere();
+	}
 	else
 	{
 		throw 'unknown model';
@@ -1045,8 +1160,8 @@ function recreate_model()
 {
 	var model = document.getElementById('model').value;
 	create_model(model);
-	create_path(path0, path1);
 	display_model();
+	recreate_path();
 }
 
 var path0 = PointT(-0.8, -0.8);
@@ -1080,17 +1195,12 @@ function recreate_path()
 
 function display_model()
 {
-	main_path.draw3_svg();
-	main_path.drawt_svg();
-	
 	main_mesh.draw3_svg();
 	main_mesh.drawt_svg();
 }
 
 function main()
 {
-	recreate_model();
-
 	d3.select('#threed_bg')
 		.call(d3.drag().on('drag', dragged));
 
@@ -1099,6 +1209,8 @@ function main()
 			.container(document.getElementById('texture_bg'))
 			.on('start', texture_drag_start)
 			.on('drag', texture_dragged));
+
+	recreate_model();
 }
 
 function dragged()
