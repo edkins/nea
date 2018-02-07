@@ -569,8 +569,12 @@ function Mesh()
 			mesh.vt.push(PointT(s,t));
 			return mesh;
 		},
-		split_vertex: function(s,t) {
-			var v3index = mesh.v3.length - 1;
+		split_vertex: function(dup_vtindex,s,t) {
+			var v3index = mesh.vt_to_v3_index[dup_vtindex];
+			if (v3index === undefined)
+			{
+				throw 'cannot find dup_vtindex';
+			}
 			var vtindex = mesh.vt.length;
 
 			mesh.vt_to_v3_index.push(v3index);
@@ -920,26 +924,23 @@ function model_wormhole()
 		var z = i / 8 - 1;
 		var radius = 0.2 + z * z * z * z;
 
-		main_mesh.vertex(radius, 0, z, s, 1);
-		main_mesh.split_vertex(s, -1);
+		main_mesh.vertex(radius, 0, z, s, -1);
 		for (var j = 1; j < 16; j++)
 		{
 			var theta = j * Math.PI / 8;
 			var t = j / 8 - 1;
 			main_mesh.vertex(radius * Math.cos(theta), radius * Math.sin(theta), z, s, t);
 		}
+		main_mesh.split_vertex(17*i, s, 1);
 	}
 	for (var i = 0; i < 16; i++)
 	{
-		for (var j = 0; j < 15; j++)
+		for (var j = 0; j < 16; j++)
 		{
-			var base = 17 * i + j + 1;
+			var base = 17 * i + j;
 			main_mesh.triangle(base, base+1, base+17);
 			main_mesh.triangle(base+1, base+18, base+17);
 		}
-		var base = 17 * i;
-		main_mesh.triangle(base+16, base, base+17+16);
-		main_mesh.triangle(base, base+17, base+17+16);
 	}
 }
 
@@ -992,6 +993,30 @@ function model_saddle()
 	}
 }
 
+function model_hyperbolic()
+{
+	main_mesh = Mesh();
+	for (var i = 0; i <= 16; i++)
+	{
+		for (var j = 0; j <= 16; j++)
+		{
+			var s = i / 8 - 1;
+			var t = j / 8 - 1;
+			var p = Point3(s,t, Math.cos(5 * Math.atan2(s,t)) * (s * s + t * t) / 2);
+			main_mesh.vertex(p.x, p.y, p.z, s, t);
+		}
+	}
+	for (var i = 0; i < 16; i++)
+	{
+		for (var j = 0; j < 16; j++)
+		{
+			var base = 17 * i + j;
+			main_mesh.triangle(base, base+1, base+17);
+			main_mesh.triangle(base+1, base+18, base+17);
+		}
+	}
+}
+
 function create_model(model)
 {
 	if (model === 'bump')
@@ -1005,6 +1030,10 @@ function create_model(model)
 	else if (model === 'saddle')
 	{
 		model_saddle();
+	}
+	else if (model === 'fivewaves')
+	{
+		model_hyperbolic();
 	}
 	else
 	{
